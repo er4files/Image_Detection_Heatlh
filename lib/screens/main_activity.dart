@@ -1,9 +1,8 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:tflite/tflite.dart';
-import 'package:glowifyflutter/screens/result_page.dart';
-import 'package:glowifyflutter/widgets/face_area_widget.dart';
+import 'dart:io';
+import 'package:tflite_v2/tflite_v2.dart';
+import 'result_activity.dart';
 
 class MainActivity extends StatefulWidget {
   @override
@@ -11,50 +10,55 @@ class MainActivity extends StatefulWidget {
 }
 
 class _MainActivityState extends State<MainActivity> {
-  File? _imageForehead;
-  File? _imageCheek;
-  File? _imageNose;
-  bool _loading = false;
-  List<String> _results = [];
-  List<String> _confidences = [];
+  File? _image;
+  final picker = ImagePicker();
+  String _result = '';
 
   @override
   void initState() {
     super.initState();
-    loadModel();
+    _loadModel();
   }
 
-  Future<void> loadModel() async {
+  Future<void> _loadModel() async {
     String? res = await Tflite.loadModel(
-      model: "assets/face_health_detection/model.tflite",
-      labels: "assets/face_health_detection/labels.txt",
+      model: "assets/model.tflite",
+      labels: "assets/labels.txt",
     );
-    print(res);
+    print("Model loaded: $res");
   }
 
-  Future<void> _pickImage(String area) async {
-    final picker = ImagePicker();
-    final pickedFile = await showModalBottomSheet<File?>(
+  Future<void> _getImageFromSource(ImageSource source) async {
+    final pickedFile = await picker.pickImage(source: source);
+
+    if (pickedFile != null) {
+      setState(() {
+        _image = File(pickedFile.path);
+      });
+    }
+  }
+
+  void _showImagePickerModal() {
+    showModalBottomSheet(
       context: context,
       builder: (BuildContext context) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+          child: Wrap(
+            children: <Widget>[
               ListTile(
-                leading: Icon(Icons.photo_camera),
-                title: Text('Ambil dari Kamera'),
-                onTap: () async {
-                  final pickedFile = await picker.pickImage(source: ImageSource.camera);
-                  Navigator.pop(context, pickedFile != null ? File(pickedFile.path) : null);
+                leading: Icon(Icons.photo_library),
+                title: Text('Gallery'),
+                onTap: () {
+                  _getImageFromSource(ImageSource.gallery);
+                  Navigator.of(context).pop();
                 },
               ),
               ListTile(
-                leading: Icon(Icons.photo_library),
-                title: Text('Pilih dari Galeri'),
-                onTap: () async {
-                  final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-                  Navigator.pop(context, pickedFile != null ? File(pickedFile.path) : null);
+                leading: Icon(Icons.camera_alt),
+                title: Text('Camera'),
+                onTap: () {
+                  _getImageFromSource(ImageSource.camera);
+                  Navigator.of(context).pop();
                 },
               ),
             ],
@@ -62,161 +66,114 @@ class _MainActivityState extends State<MainActivity> {
         );
       },
     );
+  }
 
-    if (pickedFile != null) {
+  Future<void> _analyzeImage() async {
+    if (_image != null) {
+      var recognitions = await Tflite.runModelOnImage(
+        path: _image!.path,
+        numResults: 1,
+        threshold: 0.5,
+      );
+
       setState(() {
-        if (area == "forehead") {
-          _imageForehead = pickedFile;
-        } else if (area == "cheek") {
-          _imageCheek = pickedFile;
-        } else if (area == "nose") {
-          _imageNose = pickedFile;
+        if (recognitions != null && recognitions.isNotEmpty) {
+          _result = recognitions[0]["label"];
+          double confidence = recognitions[0]["confidence"] * 100; // Get confidence percentage
+          _result += " (${confidence.toStringAsFixed(2)}%)"; // Append confidence
+        } else {
+          _result = "Unknown";
         }
       });
-    }
-  }
-
-  Future<void> classifyImage() async {
-    setState(() {
-      _loading = true;
-    });
-
-    var recognitionsForehead = await Tflite.runModelOnImage(
-      path: _imageForehead!.path,
-      numResults: 2,
-      threshold: 0.5,
-      imageMean: 127.5,
-      imageStd: 127.5,
-    );
-
-    var recognitionsCheek = await Tflite.runModelOnImage(
-      path: _imageCheek!.path,
-      numResults: 2,
-      threshold: 0.5,
-      imageMean: 127.5,
-      imageStd: 127.5,
-    );
-
-    var recognitionsNose = await Tflite.runModelOnImage(
-      path: _imageNose!.path,
-      numResults: 2,
-      threshold: 0.5,
-      imageMean: 127.5,
-      imageStd: 127.5,
-    );
-
-    setState(() {
-      _loading = false;
-      _results = [
-        recognitionsForehead != null && recognitionsForehead.isNotEmpty
-            ? recognitionsForehead[0]["label"]
-            : '',
-        recognitionsCheek != null && recognitionsCheek.isNotEmpty
-            ? recognitionsCheek[0]["label"]
-            : '',
-        recognitionsNose != null && recognitionsNose.isNotEmpty
-            ? recognitionsNose[0]["label"]
-            : ''
-      ];
-
-      _confidences = [
-        recognitionsForehead != null && recognitionsForehead.isNotEmpty
-            ? (recognitionsForehead[0]["confidence"] * 100.0).toStringAsFixed(2)
-            : '0.0',
-        recognitionsCheek != null && recognitionsCheek.isNotEmpty
-            ? (recognitionsCheek[0]["confidence"] * 100.0).toStringAsFixed(2)
-            : '0.0',
-        recognitionsNose != null && recognitionsNose.isNotEmpty
-            ? (recognitionsNose[0]["confidence"] * 100.0).toStringAsFixed(2)
-            : '0.0'
-      ];
 
       Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ResultPage(
-          results: _results,
-          confidences: _confidences,
-          imageForehead: _imageForehead,
-          imageCheek: _imageCheek,
-          imageNose: _imageNose,
+        context,
+        MaterialPageRoute(
+          builder: (context) => ResultActivity(image: _image!, result: _result),
         ),
-      ),
-    );
-
-    });
-  }
-
-  @override
-  void dispose() {
-    Tflite.close();
-    super.dispose();
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    bool allImagesSelected = _imageForehead != null && _imageCheek != null && _imageNose != null;
-
     return Scaffold(
       appBar: AppBar(
-        title: Text('Deteksi Kesehatan Wajah'),
-        backgroundColor: Color.fromARGB(255, 255, 255, 255),
-        elevation: 2,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back),
-          onPressed: () {
-            Navigator.pop(context);
-          },
-        ),
+        title: Text('GenDetc Aplikasii', style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.lightBlueAccent,
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              FaceAreaWidget(
-                title: "Area Dahi",
-                image: _imageForehead,
-                onTap: () => _pickImage("forehead"),
-              ),
-              SizedBox(height: 16),
-              FaceAreaWidget(
-                title: "Area Pipi",
-                image: _imageCheek,
-                onTap: () => _pickImage("cheek"),
-              ),
-              SizedBox(height: 16),
-              FaceAreaWidget(
-                title: "Area Hidung",
-                image: _imageNose,
-                onTap: () => _pickImage("nose"),
-              ),
-              SizedBox(height: 32),
-              ElevatedButton(
-                onPressed: allImagesSelected && !_loading ? classifyImage : null,
-                style: ElevatedButton.styleFrom(
-                  primary: Color(0xFFED6672),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10.0),
+      backgroundColor: Colors.white,
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                GestureDetector(
+                  onTap: _showImagePickerModal,
+                  child: Container(
+                    height: 400,
+                    decoration: BoxDecoration(
+                      color: Colors.blue[100],
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Center(
+                      child: _image == null
+                          ? Text('Foto', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold))
+                          : ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: Image.file(
+                                _image!,
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                height: double.infinity,
+                              ),
+                            ),
+                    ),
                   ),
-                  padding: EdgeInsets.symmetric(vertical: 16.0),
-                  elevation: 4,
                 ),
-                child: _loading
-                    ? CircularProgressIndicator(color: Colors.white)
-                    : Text(
-                        'Analisis AI',
-                        style: TextStyle(
-                          fontSize: 18.0,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-              ),
-            ],
+                SizedBox(height: 30),
+                ElevatedButton(
+                  onPressed: _analyzeImage,
+                  child: Text('Analyze', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    minimumSize: Size(double.infinity, 50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+          Positioned(
+            top: 50,
+            left: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Hello Guys!',
+                  style: TextStyle(
+                    color: Colors.blue,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 28,
+                  ),
+                ),
+                Text(
+                  'Have a nice day.',
+                  style: TextStyle(
+                    color: Colors.grey[500],
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
